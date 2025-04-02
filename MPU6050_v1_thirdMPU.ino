@@ -1,11 +1,11 @@
 #if defined(ESP32)
   #include <WiFiMulti.h>
   WiFiMulti wifiMulti;
-  #define DEVICE "ESP32_THIRD"
+  #define DEVICE "ESP32_FIRST"
 #elif defined(ESP8266)
   #include <ESP8266WiFiMulti.h>
   ESP8266WiFiMulti wifiMulti;
-  #define DEVICE "ESP8266_THIRD"
+  #define DEVICE "ESP8266_FIRST"
 #endif
 
 #include <InfluxDbClient.h>
@@ -14,16 +14,17 @@
 #include <Wire.h>
 #include <secrets.h>
 
-// InfluxDB client
 InfluxDBClient client(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN);
 Point sensor("mpu6050_data");
 
-// MPU6050
 Adafruit_MPU6050 mpu;
+
+#define CONTROL_PIN 4
 
 void setup() {
     Serial.begin(115200);
     Wire.begin();
+    pinMode(CONTROL_PIN, INPUT);
 
     WiFi.mode(WIFI_STA);
     wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
@@ -44,10 +45,9 @@ void setup() {
         Serial.println(client.getLastErrorMessage());
     }
 
-    // Tags
     sensor.addTag("device", DEVICE);
     sensor.addTag("SSID", WiFi.SSID());
-    sensor.addTag("sensor_id", "3");
+    sensor.addTag("sensor_id", "1");
 
     if (!mpu.begin(0x68)) {
         Serial.println("Failed to find MPU6050!");
@@ -58,26 +58,33 @@ void setup() {
 }
 
 void loop() {
-    sensor.clearFields();
+    int controlState = digitalRead(CONTROL_PIN);
 
-    sensors_event_t a, g, temp;
-    mpu.getEvent(&a, &g, &temp);
+    if (controlState == LOW) {
+        Serial.println("Recording ENABLED (wire removed)");
 
-    sensor.addField("acc_x", a.acceleration.x);
-    sensor.addField("acc_y", a.acceleration.y);
-    sensor.addField("acc_z", a.acceleration.z);
-    sensor.addField("gyro_x", g.gyro.x);
-    sensor.addField("gyro_y", g.gyro.y);
-    sensor.addField("gyro_z", g.gyro.z);
-    sensor.addField("temperature", temp.temperature);
-    sensor.addField("rssi", WiFi.RSSI());
+        sensor.clearFields();
+        sensors_event_t a, g, temp;
+        mpu.getEvent(&a, &g, &temp);
 
-    Serial.print("Writing to InfluxDB: ");
-    Serial.println(sensor.toLineProtocol());
+        sensor.addField("acc_x", a.acceleration.x);
+        sensor.addField("acc_y", a.acceleration.y);
+        sensor.addField("acc_z", a.acceleration.z);
+        sensor.addField("gyro_x", g.gyro.x);
+        sensor.addField("gyro_y", g.gyro.y);
+        sensor.addField("gyro_z", g.gyro.z);
+        sensor.addField("temperature", temp.temperature);
+        sensor.addField("rssi", WiFi.RSSI());
 
-    if (!client.writePoint(sensor)) {
-        Serial.print("InfluxDB write failed: ");
-        Serial.println(client.getLastErrorMessage());
+        Serial.print("Writing to InfluxDB: ");
+        Serial.println(sensor.toLineProtocol());
+
+        if (!client.writePoint(sensor)) {
+            Serial.print("InfluxDB write failed: ");
+            Serial.println(client.getLastErrorMessage());
+        }
+    } else {
+        Serial.println("Recording DISABLED (wire connected to 5V)");
     }
 
     delay(1000);
